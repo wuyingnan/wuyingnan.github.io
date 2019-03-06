@@ -1,0 +1,60 @@
+---
+layout:     post
+title:      "Control UR5 robot in Windows Subsystem for Linux"
+subtitle:   " A quick memo"
+date:       2019-03-06
+author:     "yingnan"
+header-img: "img/post-bg-2015.jpg"
+tags:
+    - 环境配置
+---
+
+## 前言
+
+由于项目的其他依赖都只有在Windows上有实现，我费了一些功夫在WSL上安装了ROS。现在在Windows环境上也可以使用ROS控制UR5机器人了。想必其他工业机器人也可以以类似的方法在Windows上实现控制。在此写下整个配置方便未来的自己以及其他有需要的同学。
+
+## 软件版本
+
+* Ubuntu 18.04 Bionic
+* ROS melodic
+* Windows 10 64bit 1809
+
+安装过程中WSL版本选用了Ubuntu 18.04 Bionic，对应的ROS版本为melodic。据说14.04上的Indigo可以很方便的用包管理器直接安装ROS和相关驱动，但是14.04实在是太老了。而16.04和18.04都有一些问题要解决，18.04还换回了GNOME，索性直接装了最新的18.04。
+Windows版本至少需要Windows 10 1809（这一点在之后有[解释](#firewall)）。
+
+## WSL安装
+
+这一部分网上有充分的教程，比如我参考的[这个](https://docs.microsoft.com/en-us/windows/wsl/install-win10)。我就不仔细展开了。安装完成之后，如果觉得默认的bash终端模拟器不太好用，可以安装[WSLtty](https://github.com/mintty/wsltty)。如果想让终端更好看，可以安装[Cmder](https://cmder.net/)。但是Cmder基于ConEmu，与WSL会有一些兼容性方面的问题。比如在Vim下方向键失灵，tmux不可用等。不知道现在这些问题有没有解决。
+
+## ROS安装
+
+安装ROS部分我参考的是ROS Wiki上推荐的[这篇教程](https://janbernloehr.de/2017/06/10/ros-windows)。为了之后使用ROS中的GUI程序，我们还需要在Windows上安装一个X Server。现在能用而且还在更新的X Server主要有三个：
+- [Xming](http://www.straightrunning.com/XmingNotes/)
+- [VcXsrv](https://sourceforge.net/projects/vcxsrv/)
+- [X410](https://token2shell.com/x410/)
+
+Xming是最早的Windows X Server，在下载最新版时据说作者会强制你捐款。X410是Windows商城中的UWP程序而且需要收费（但是常年打折）。VcXsrv是完全免费开源的。这三者使用起来都会有一些兼容性问题，有些软件可以开有些不能。X410有可能对高分辨率支持好一些。在此我还是选了VcXsrv，毕竟是免费的可以先尝试一下。按照这段开头说的教程安装完成之后，可以运行下ROS的turtle测试一下。如果乌龟在Windows窗口中出现，那么ROS和X Server都没什么大问题了。
+
+## UR机器人驱动以及moveit安装
+
+这部分遇到的问题比较难，所幸网上有办法解决了。ROS melodic相对的还比较新，没有直接apt安装的UR驱动，需要通过源码编译安装。首先在ROS的工作空间下下载驱动代码。
+```Shells
+cd catkin_ws/src
+git clone -b kinetic-devel https://github.com/ros-industrial/universal_robot.git
+git clone https://github.com/ros-industrial/ur_modern_driver.git
+```
+注意这里universal_robot这个仓库使用的是kinetic-devel这个branch，而ur_modern_driver这个仓库需要使用master branch而非kinetic-devel。否则在我机器上cmake会报错。当然到这里还没有完，因为这个时候如果catkin_make的话，编译仍然会报错。错误提示类似：error: 'const struct hardware_interface::ControllerInfo' has no member named 'hardware_interface'。[这里](https://blog.csdn.net/zhang970187013/article/details/81037398)汇总了Github上的一些讨论以及解决方法。我的解决方法是，直接去报错的文件里，将**\-\>hardware_interface**替换为**\-\>claimed_resources[0].hardware_interface**。当然你也可以直接使用别人修改好的驱动（这个驱动我没有使用过，不确定应该使用哪个分支）：
+```Shells
+cd catkin_ws/src
+rm -rf ur_modern_driver
+git clone https://github.com/iron-ox/ur_modern_driver.git
+```
+修改好之后直接catkin_make，按照ROS包的标准方法编译安装。
+moveit的安装比较简单，直接使用apt安装即可
+```Shells
+sudo apt-get install ros-melodic-moveit
+```
+
+<p id = "firewall"></p>
+## Windows防火墙
+安装好ROS和moveit之后，你可能会发现实际运行时，UR5机器人的运动状态可以出现在rviz中，并且实际拖动机器人，rviz中的机器人也会移动。然而你点击plan&execute之后，机器人并不受moveit的控制。WSL中的ROS已经可以读取机器人的信息，却不能控制机器人的运动。这是由于Windows防火墙引起的问题。在1809之后，WSL中的程序在绑定Socket端口时，Windows防火墙会自动提示你是否阻止。这时只要不阻止通信，ROS就可以正常控制机器人运动。在1809之前，WSL没有自动的提示，需要我们手动打开防火墙的端口。[这篇文章](https://newscrewdriver.com/2018/09/02/windows-10-wsl-can-run-ros-with-firewall-caveat/)介绍了如何打开端口。实际控制UR需要打开的除了11311端口，还有50001，6173，6170，53552等端口。具体端口占用可以在Windows资源监视器中搜索ur_driver查看。当然，手动打开端口是比较危险的，因此我建议Windows升级到1809之后再控制机器人。
